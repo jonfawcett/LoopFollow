@@ -2,18 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDisplayName</key>
+	<string>$(display_name)</string>
 	<key>AppGroupIdentifier</key>
-	<string>group.com.$(unique_id).LoopFollow</string>
+	<string>group.com.$(unique_id).LoopFollow$(app_suffix)</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>com.$(unique_id).LoopFollow</string>
+		<string>com.$(unique_id).LoopFollow$(app_suffix)</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.$(unique_id).LoopFollow</string>
+	<string>com.$(unique_id).LoopFollow$(app_suffix)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -30,10 +32,6 @@
 	<true/>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Loop Follow would like to access your calendar to save BG readings</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Loop Follow would like to access to your photo library to save graph images</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Loop Follow would like to access to your photo library to save graph images</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

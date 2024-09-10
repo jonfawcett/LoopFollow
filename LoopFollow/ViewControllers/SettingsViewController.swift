@@ -10,182 +10,161 @@ import UIKit
 import Eureka
 import EventKit
 import EventKitUI
+import SwiftUI
 
 class SettingsViewController: FormViewController {
-
-   var appStateController: AppStateController?
+    var tokenRow: TextRow?
+    var appStateController: AppStateController?
     var statusLabelRow: LabelRow!
 
     func showHideNSDetails() {
         var isHidden = false
         var isEnabled = true
-        var isLoopHidden = false;
-        if UserDefaultsRepository.url.value == "" || !UserDefaultsRepository.loopUser.value {
+        if !IsNightscoutEnabled() {
             isHidden = true
             isEnabled = false
         }
-        
+
         if let row1 = form.rowBy(tag: "informationDisplaySettings") as? ButtonRow {
             row1.hidden = .function(["hide"],  {form in
                 return isHidden
             })
             row1.evaluateHidden()
         }
-        
-        if UserDefaultsRepository.url.value != "" {
+
+        if IsNightscoutEnabled() {
             isEnabled = true
         }
-        
+
         guard let nightscoutTab = self.tabBarController?.tabBar.items![3] else { return }
         nightscoutTab.isEnabled = isEnabled
-        
     }
-   
-    // Determine if the build is from TestFlight
-    func isTestFlightBuild() -> Bool {
-#if targetEnvironment(simulator)
-        return false
-#else
-        if Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil {
-            return false
-        }
-        guard let receiptName = Bundle.main.appStoreReceiptURL?.lastPathComponent else {
-            return false
-        }
-        return "sandboxReceipt".caseInsensitiveCompare(receiptName) == .orderedSame
-#endif
-    }
-    
-    // Get the build date from the build details
-    func buildDate() -> Date? {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "EEE MMM d HH:mm:ss 'UTC' yyyy"
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-        dateFormatter.timeZone = TimeZone(identifier: "UTC")
-        
-        guard let dateString = BuildDetails.default.buildDateString,
-              let date = dateFormatter.date(from: dateString) else {
-            return nil
-        }
-        return date
-    }
-    
-    // Calculate the expiration date based on the build type
-    func calculateExpirationDate() -> Date {
-        if isTestFlightBuild(), let buildDate = buildDate() {
-            // For TestFlight, add 90 days to the build date
-            return Calendar.current.date(byAdding: .day, value: 90, to: buildDate)!
-        } else {
-            // For Xcode builds, use the provisioning profile's expiration date
-            if let provision = MobileProvision.read() {
-                return provision.expirationDate
-            } else {
-                return Date() // Fallback to current date if unable to read provisioning profile
-            }
-        }
-    }
-    
-   override func viewDidLoad() {
+
+    override func viewDidLoad() {
         super.viewDidLoad()
         if UserDefaultsRepository.forceDarkMode.value {
             overrideUserInterfaceStyle = .dark
         }
-       UserDefaultsRepository.showNS.value = false
-       UserDefaultsRepository.showDex.value = false
-    
-       let expiration = calculateExpirationDate()
-       var expirationHeaderString = "App Expiration"
-       if isTestFlightBuild() {
-          expirationHeaderString = "Beta (TestFlight) Expiration"
-       }
-                        
+        UserDefaultsRepository.showNS.value = false
+        UserDefaultsRepository.showDex.value = false
+
+        let buildDetails = BuildDetails.default
+        let formattedBuildDate = dateTimeUtils.formattedDate(from: buildDetails.buildDate())
+        let branchAndSha = buildDetails.branchAndSha
+        let expiration = dateTimeUtils.formattedDate(from: buildDetails.calculateExpirationDate())
+        let expirationHeaderString = buildDetails.expirationHeaderString
+        let versionManager = AppVersionManager()
+        let version = versionManager.version()
+
         form
         +++ Section(header: "Data Settings", footer: "")
-       <<< SegmentedRow<String>("units") { row in
-           row.title = "Units"
-           row.options = ["mg/dL", "mmol/L"]
-           row.value = UserDefaultsRepository.units.value
-       }.onChange { row in
-           guard let value = row.value else { return }
-           UserDefaultsRepository.units.value = value
-       }
-       <<< SwitchRow("showNS"){ row in
-       row.title = "Show Nightscout Settings"
-       row.value = UserDefaultsRepository.showNS.value
-       }.onChange { [weak self] row in
-               guard let value = row.value else { return }
-               UserDefaultsRepository.showNS.value = value
-       }
-       <<< TextRow() { row in
-           row.title = "URL"
-           row.placeholder = "https://mycgm.herokuapp.com"
-           row.value = UserDefaultsRepository.url.value
-           row.hidden = "$showNS == false"
-       }.cellSetup { (cell, row) in
-           cell.textField.autocorrectionType = .no
-           cell.textField.autocapitalizationType = .none
-       }.onChange { row in
-           guard let value = row.value else {
-               UserDefaultsRepository.url.value = ""
-               self.showHideNSDetails()
-               return }
-           // check the format of the URL entered by the user and trim away any spaces or "/" at the end
-           var urlNSInput = value.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
-           if urlNSInput.last == "/" {
-               urlNSInput = String(urlNSInput.dropLast())
-           }
-           UserDefaultsRepository.url.value = urlNSInput.lowercased()
-           // set the row value back to the correctly formatted URL so that the user immediately sees how it should have been written
-           row.value = UserDefaultsRepository.url.value
-           self.showHideNSDetails()
-           globalVariables.nsVerifiedAlert = 0
-           
-           // Verify Nightscout URL and token
-           self.checkNightscoutStatus()
-       }
-       <<< TextRow() { row in
-           row.title = "NS Token"
-           row.placeholder = "Leave blank if not using tokens"
-           row.value = UserDefaultsRepository.token.value
-           row.hidden = "$showNS == false"
-       }.cellSetup { (cell, row) in
-           cell.textField.autocorrectionType = .no
-           cell.textField.autocapitalizationType = .none
-           cell.textField.textContentType = .password
-       }.onChange { row in
-           if row.value == nil {
-               UserDefaultsRepository.token.value = ""
-           }
-           guard let value = row.value else { return }
-           UserDefaultsRepository.token.value = value
-           globalVariables.nsVerifiedAlert = 0
-           
-           // Verify Nightscout URL and token
-           self.checkNightscoutStatus()
-       }
-       <<< LabelRow() { row in
-           row.title = "NS Status"
-           row.value = "Checking..."
-           statusLabelRow = row
-           row.hidden = "$showNS == false"
-       }
-       <<< SwitchRow("loopUser"){ row in
-           row.title = "Download Loop/iAPS Data"
-           row.tag = "loopUser"
-           row.value = UserDefaultsRepository.loopUser.value
-           row.hidden = "$showNS == false"
-       }.onChange { [weak self] row in
-                   guard let value = row.value else { return }
-                   UserDefaultsRepository.loopUser.value = value
-           }
-        
-       <<< SwitchRow("showDex"){ row in
-       row.title = "Show Dexcom Settings"
-       row.value = UserDefaultsRepository.showDex.value
-       }.onChange { [weak self] row in
-               guard let value = row.value else { return }
-               UserDefaultsRepository.showDex.value = value
-       }
+        <<< SegmentedRow<String>("units") { row in
+            row.title = "Units"
+            row.options = ["mg/dL", "mmol/L"]
+            row.value = UserDefaultsRepository.units.value
+        }.onChange { row in
+            guard let value = row.value else { return }
+            UserDefaultsRepository.units.value = value
+        }
+        <<< SwitchRow("showNS"){ row in
+            row.title = "Show Nightscout Settings"
+            row.value = UserDefaultsRepository.showNS.value
+        }.onChange { [weak self] row in
+            guard let value = row.value else { return }
+            UserDefaultsRepository.showNS.value = value
+        }
+        <<< TextRow() { row in
+            row.title = "URL"
+            row.placeholder = "https://mycgm.herokuapp.com"
+            row.value = ObservableUserDefaults.shared.url.value
+            row.hidden = "$showNS == false"
+        }.cellSetup { (cell, row) in
+            cell.textField.autocorrectionType = .no
+            cell.textField.autocapitalizationType = .none
+        }.onChange { row in
+            guard let value = row.value else {
+                ObservableUserDefaults.shared.url.value = ""
+                self.showHideNSDetails()
+                return
+            }
+
+            var useTokenUrl = false
+
+            // Attempt to handle special case: pasted URL including token
+            if let urlComponents = URLComponents(string: value), let queryItems = urlComponents.queryItems {
+                if let tokenItem = queryItems.first(where: { $0.name.lowercased() == "token" }) {
+                    let tokenPattern = "^[^-\\s]+-[0-9a-fA-F]{16}$"
+                    if let token = tokenItem.value, let _ = token.range(of: tokenPattern, options: .regularExpression) {
+                        var baseComponents = urlComponents
+                        baseComponents.queryItems = nil
+                        if let baseURL = baseComponents.string {
+                            UserDefaultsRepository.token.value = token
+                            self.tokenRow?.value = token
+                            self.tokenRow?.updateCell()
+
+                            ObservableUserDefaults.shared.url.value = baseURL
+                            row.value = baseURL
+                            row.updateCell()
+                            useTokenUrl = true
+                        }
+                    }
+                }
+            }
+
+            if !useTokenUrl {
+                // Normalize input: remove unwanted characters and lowercase
+                let filtered = value.replacingOccurrences(of: "[^A-Za-z0-9:/._-]", with: "", options: .regularExpression).lowercased()
+
+                // Further clean-up: Remove trailing slashes
+                var cleanURL = filtered
+                while cleanURL.count > 8 && cleanURL.last == "/" {
+                    cleanURL = String(cleanURL.dropLast())
+                }
+
+                ObservableUserDefaults.shared.url.value = cleanURL
+                row.value = cleanURL
+                row.updateCell()
+            }
+
+            self.showHideNSDetails()
+
+            // Verify Nightscout URL and token
+            self.checkNightscoutStatus()
+        }
+
+        <<< TextRow() { row in
+            row.title = "NS Token"
+            row.placeholder = "Leave blank if not using tokens"
+            row.value = UserDefaultsRepository.token.value
+            row.hidden = "$showNS == false"
+            self.tokenRow = row
+        }.cellSetup { (cell, row) in
+            cell.textField.autocorrectionType = .no
+            cell.textField.autocapitalizationType = .none
+            cell.textField.textContentType = .password
+        }.onChange { row in
+            if row.value == nil {
+                UserDefaultsRepository.token.value = ""
+            }
+            guard let value = row.value else { return }
+            UserDefaultsRepository.token.value = value
+
+            // Verify Nightscout URL and token
+            self.checkNightscoutStatus()
+        }
+        <<< LabelRow() { row in
+            row.title = "NS Status"
+            row.value = "Checking..."
+            statusLabelRow = row
+            row.hidden = "$showNS == false"
+        }
+        <<< SwitchRow("showDex"){ row in
+            row.title = "Show Dexcom Settings"
+            row.value = UserDefaultsRepository.showDex.value
+        }.onChange { row in
+            guard let value = row.value else { return }
+            UserDefaultsRepository.showDex.value = value
+        }
         <<< TextRow(){ row in
             row.title = "User Name"
             row.value = UserDefaultsRepository.shareUserName.value
@@ -199,7 +178,6 @@ class SettingsViewController: FormViewController {
             }
             guard let value = row.value else { return }
             UserDefaultsRepository.shareUserName.value = value
-            globalVariables.dexVerifiedAlert = 0
         }
         <<< TextRow(){ row in
             row.title = "Password"
@@ -215,7 +193,6 @@ class SettingsViewController: FormViewController {
             }
             guard let value = row.value else { return }
             UserDefaultsRepository.sharePassword.value = value
-            globalVariables.dexVerifiedAlert = 0
         }
         <<< SegmentedRow<String>("shareServer") { row in
             row.title = "Server"
@@ -226,82 +203,148 @@ class SettingsViewController: FormViewController {
             guard let value = row.value else { return }
             UserDefaultsRepository.shareServer.value = value
         }
-        
+
         +++ Section("App Settings")
-       
+
         <<< ButtonRow() {
-           $0.title = "General Settings"
-           $0.presentationMode = .show(
-               controllerProvider: .callback(builder: {
-                  let controller = GeneralSettingsViewController()
-                  controller.appStateController = self.appStateController
-                  return controller
-               }
-           ), onDismiss: nil)
+            $0.title = "General Settings"
+            $0.presentationMode = .show(
+                controllerProvider: .callback(builder: {
+                    let controller = GeneralSettingsViewController()
+                    controller.appStateController = self.appStateController
+                    return controller
+                }
+                                             ), onDismiss: nil)
         }
         <<< ButtonRow("graphSettings") {
-           $0.title = "Graph Settings"
-           $0.presentationMode = .show(
-               controllerProvider: .callback(builder: {
-                  let controller = GraphSettingsViewController()
-                  controller.appStateController = self.appStateController
-                  return controller
-               }
-           ), onDismiss: nil)
+            $0.title = "Graph Settings"
+            $0.presentationMode = .show(
+                controllerProvider: .callback(builder: {
+                    let controller = GraphSettingsViewController()
+                    controller.appStateController = self.appStateController
+                    return controller
+                }
+                                             ), onDismiss: nil)
         }
         <<< ButtonRow("informationDisplaySettings") {
-           $0.title = "Information Display Settings"
-           $0.presentationMode = .show(
-               controllerProvider: .callback(builder: {
-                  let controller = InfoDisplaySettingsViewController()
-                  controller.appStateController = self.appStateController
-                  return controller
-               }
-           ), onDismiss: nil)
-            
+            $0.title = "Information Display Settings"
+            $0.presentationMode = .show(
+                controllerProvider: .callback(builder: {
+                    self.presentInfoDisplaySettings()
+                    return UIViewController()
+                }
+                                             ), onDismiss: nil)
         }
-        
+        <<< ButtonRow("alarmsSettings") {
+            $0.title = "Alarms"
+            $0.presentationMode = .show(
+                controllerProvider: .callback(builder: {
+                    guard let alarmVC = ViewControllerManager.shared.alarmViewController else {
+                        fatalError("AlarmViewController should be pre-instantiated and available")
+                    }
+                    return alarmVC
+                }), onDismiss: nil)
+        }
+
         +++ Section("Integrations")
         <<< ButtonRow() {
-           $0.title = "Apple Watch and Carplay"
-           $0.presentationMode = .show(
-               controllerProvider: .callback(builder: {
-                  let controller = WatchSettingsViewController()
-                  controller.appStateController = self.appStateController
-                  return controller
-               }
-           ), onDismiss: nil)
-            
+            $0.title = "Apple Watch and Carplay"
+            $0.presentationMode = .show(
+                controllerProvider: .callback(builder: {
+                    let controller = WatchSettingsViewController()
+                    controller.appStateController = self.appStateController
+                    return controller
+                }
+                                             ), onDismiss: nil)
+
         }
-        
-       +++ Section("Advanced Settings")
+
+        +++ Section("Advanced Settings")
         <<< ButtonRow() {
-           $0.title = "Advanced Settings"
-           $0.presentationMode = .show(
-               controllerProvider: .callback(builder: {
-                  let controller = AdvancedSettingsViewController()
-                  controller.appStateController = self.appStateController
-                  return controller
-               }
-           ), onDismiss: nil)
-            
+            $0.title = "Advanced Settings"
+            $0.presentationMode = .show(
+                controllerProvider: .callback(builder: {
+                    let controller = AdvancedSettingsViewController()
+                    controller.appStateController = self.appStateController
+                    return controller
+                }
+                                             ), onDismiss: nil)
+
         }
 
-       +++ Section(header: getAppVersion(), footer: "")
-
-       +++ Section(header: expirationHeaderString, footer: String(expiration.description))
+        +++ Section("Build Information")
+        <<< LabelRow() {
+            $0.title = "Version"
+            $0.value = version
+            $0.tag = "currentVersionRow"
+        }
+        <<< LabelRow() {
+            $0.title = "Latest version"
+            $0.value = "Fetching..."
+            $0.tag = "latestVersionRow"
+        }
+        <<< LabelRow() {
+            $0.title = expirationHeaderString
+            $0.value = expiration
+            $0.hidden = Condition(booleanLiteral: isMacApp())
+        }
+        <<< LabelRow() {
+            $0.title = "Built"
+            $0.value = formattedBuildDate
+        }
+        <<< LabelRow() {
+            $0.title = "Branch"
+            $0.value = branchAndSha
+        }
 
         showHideNSDetails()
-       checkNightscoutStatus()
+        checkNightscoutStatus()
     }
-    
-    func getAppVersion() -> String {
-        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
-            return "App Version: \(version)"
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+
+        refreshVersionInfo()
+        checkNightscoutStatus()
+    }
+
+    func refreshVersionInfo() {
+        let versionManager = AppVersionManager()
+        versionManager.checkForNewVersion { latestVersion, isNewer, isBlacklisted in
+            DispatchQueue.main.async {
+                if let currentVersionRow = self.form.rowBy(tag: "currentVersionRow") as? LabelRow {
+                    currentVersionRow.cell.detailTextLabel?.textColor = self.getColor(isBlacklisted: isBlacklisted, isNewer: isNewer, isCurrent: latestVersion == versionManager.version())
+                    currentVersionRow.updateCell()
+                }
+
+                if let latestVersionRow = self.form.rowBy(tag: "latestVersionRow") as? LabelRow {
+                    latestVersionRow.value = latestVersion ?? "Unknown"
+                    latestVersionRow.updateCell()
+                }
+            }
         }
-        return "Version Unknown"
     }
-    
+
+    private func getColor(isBlacklisted: Bool, isNewer: Bool, isCurrent: Bool) -> UIColor {
+        if isBlacklisted {
+            return .red
+        } else if isNewer {
+            return .orange
+        } else if isCurrent {
+            return .green
+        } else {
+            return .secondaryLabel
+        }
+    }
+
+    func isMacApp() -> Bool {
+#if targetEnvironment(macCatalyst)
+        return true
+#else
+        return false
+#endif
+    }
+
     func updateStatusLabel(error: NightscoutUtils.NightscoutError?) {
         if let error = error {
             switch error {
@@ -321,17 +364,33 @@ class SettingsViewController: FormViewController {
                 statusLabelRow.value = "Address Empty"
             }
         } else {
-            statusLabelRow.value = "OK"
+            statusLabelRow.value = "OK (Read\(ObservableUserDefaults.shared.nsWriteAuth.value ? " & Write" : ""))"
             NotificationCenter.default.post(name: NSNotification.Name("refresh"), object: nil)
         }
         statusLabelRow.updateCell()
     }
-    
+
     func checkNightscoutStatus() {
-        NightscoutUtils.verifyURLAndToken(urlUser: UserDefaultsRepository.url.value, token: UserDefaultsRepository.token.value) { error in
+        NightscoutUtils.verifyURLAndToken { error, jwtToken, nsWriteAuth in
             DispatchQueue.main.async {
+                ObservableUserDefaults.shared.nsWriteAuth.value = nsWriteAuth
+
                 self.updateStatusLabel(error: error)
             }
         }
+    }
+
+    func presentInfoDisplaySettings() {
+        let viewModel = InfoDisplaySettingsViewModel()
+        let settingsView = InfoDisplaySettingsView(viewModel: viewModel)
+
+        let hostingController = UIHostingController(rootView: settingsView)
+        hostingController.modalPresentationStyle = .formSheet
+
+        if UserDefaultsRepository.forceDarkMode.value {
+            hostingController.overrideUserInterfaceStyle = .dark
+        }
+
+        present(hostingController, animated: true, completion: nil)
     }
 }

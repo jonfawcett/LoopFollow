@@ -41,15 +41,18 @@ extension MainViewController {
         
         var tempBasal: [[String:AnyObject]] = []
         var bolus: [[String:AnyObject]] = []
+        var smb: [[String:AnyObject]] = []
         var carbs: [[String:AnyObject]] = []
         var temporaryOverride: [[String:AnyObject]] = []
+        var temporaryTarget: [[String:AnyObject]] = []
         var note: [[String:AnyObject]] = []
         var bgCheck: [[String:AnyObject]] = []
         var suspendPump: [[String:AnyObject]] = []
         var resumePump: [[String:AnyObject]] = []
         var pumpSiteChange: [cageData] = []
         var cgmSensorStart: [sageData] = []
-        
+        var insulinCartridge: [iageData] = []
+
         for entry in entries {
             guard let eventType = entry["eventType"] as? String else {
                 continue
@@ -58,15 +61,23 @@ extension MainViewController {
             switch eventType {
             case "Temp Basal":
                 tempBasal.append(entry)
-            case "Correction Bolus", "Bolus", "SMB":
-                bolus.append(entry)
+            case "Correction Bolus", "Bolus":
+                if let automatic = entry["automatic"] as? Bool, automatic {
+                    smb.append(entry)
+                } else {
+                    bolus.append(entry)
+                }
+            case "SMB":
+                smb.append(entry)
             case "Meal Bolus":
                 carbs.append(entry)
                 bolus.append(entry)
             case "Carb Correction":
                 carbs.append(entry)
-            case "Temporary Override", "Temporary Target":
+            case "Temporary Override":
                 temporaryOverride.append(entry)
+            case "Temporary Target":
+                temporaryTarget.append(entry)
             case "Note":
                 note.append(entry)
                 print("Note: \(String(describing: entry))")
@@ -85,6 +96,11 @@ extension MainViewController {
                 if let createdAt = entry["created_at"] as? String {
                     let newEntry = sageData(created_at: createdAt)
                     cgmSensorStart.append(newEntry)
+                }
+            case "Insulin Change":
+                if let createdAt = entry["created_at"] as? String {
+                    let newEntry = iageData(created_at: createdAt)
+                    insulinCartridge.append(newEntry)
                 }
             default:
                 print("No Match: \(String(describing: entry))")
@@ -105,6 +121,13 @@ extension MainViewController {
                 clearOldBolus()
             }
         }
+        if smb.count > 0 {
+            processNSSmb(entries: smb)
+        } else {
+            if smbData.count > 0 {
+                clearOldSmb()
+            }
+        }
         updateTodaysCarbsFromEntries(entries: carbs)
         if carbs.count > 0 {
             processNSCarbs(entries: carbs)
@@ -120,12 +143,14 @@ extension MainViewController {
                 clearOldBGCheck()
             }
         }
+        if temporaryOverride.count == 0 && temporaryTarget.count == 0 && overrideGraphData.count > 0 {
+            clearOldOverride()
+        }
         if temporaryOverride.count > 0 {
             processNSOverrides(entries: temporaryOverride)
-        } else {
-            if overrideGraphData.count > 0 {
-                clearOldOverride()
-            }
+        }
+        if temporaryTarget.count > 0 {
+            processNSTemporaryTarget(entries: temporaryTarget)
         }
         if suspendPump.count > 0 {
             processSuspendPump(entries: suspendPump)
@@ -149,6 +174,9 @@ extension MainViewController {
                 clearOldSensor()
             }
         }
+
+        processIage(entries: insulinCartridge)
+
         if note.count > 0 {
             processNotes(entries: note)
         } else {

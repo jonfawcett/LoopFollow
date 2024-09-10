@@ -17,37 +17,35 @@ extension MainViewController {
         let count = graphHours * 12
         dexShare?.fetchData(count) { (err, result) -> () in
             
-            // TODO: add error checking
-            if(err == nil) {
-                let data = result!
+            if let error = err {
+                print("Error fetching Dexcom data: \(error.localizedDescription)")
                 
-                // If Dex data is old, load from NS instead
-                let latestDate = data[0].date
-                let now = dateTimeUtils.getNowTimeIntervalUTC()
-                if (latestDate + 330) < now && UserDefaultsRepository.url.value != "" {
-                    self.webLoadNSBGData()
-                    print("dex didn't load, triggered NS attempt")
-                    return
-                }
-                
-                // Dexcom only returns 24 hrs of data. If we need more, call NS.
-                if graphHours > 24 && UserDefaultsRepository.url.value != "" {
-                    self.webLoadNSBGData(dexData: data)
-                } else {
-                    self.ProcessDexBGData(data: data, sourceName: "Dexcom")
-                }
-            } else {
                 // If we get an error, immediately try to pull NS BG Data
-                if UserDefaultsRepository.url.value != "" {
+                if IsNightscoutEnabled() {
                     self.webLoadNSBGData()
                 }
-                
-                if globalVariables.dexVerifiedAlert < dateTimeUtils.getNowTimeIntervalUTC() + 300 {
-                    globalVariables.dexVerifiedAlert = dateTimeUtils.getNowTimeIntervalUTC()
-                    DispatchQueue.main.async {
-                        //self.sendNotification(title: "Dexcom Share Error", body: "Please double check user name and password, internet connection, and sharing status.")
-                    }
-                }
+                return
+            }
+            
+            guard let data = result else {
+                print("Received nil data from Dexcom")
+                return
+            }
+            
+            // If Dex data is old, load from NS instead
+            let latestDate = data[0].date
+            let now = dateTimeUtils.getNowTimeIntervalUTC()
+            if (latestDate + 330) < now && IsNightscoutEnabled() {
+                self.webLoadNSBGData()
+                print("Dex data is old, loading from NS instead")
+                return
+            }
+            
+            // Dexcom only returns 24 hrs of data. If we need more, call NS.
+            if graphHours > 24 && IsNightscoutEnabled() {
+                self.webLoadNSBGData(dexData: data)
+            } else {
+                self.ProcessDexBGData(data: data, sourceName: "Dexcom")
             }
         }
     }
@@ -57,7 +55,7 @@ extension MainViewController {
         if UserDefaultsRepository.debugLog.value { self.writeDebugLog(value: "Download: BG") }
         
         // This kicks it out in the instance where dexcom fails but they aren't using NS &&
-        if UserDefaultsRepository.url.value == "" {
+        if !IsNightscoutEnabled() {
             self.startBGTimer(time: 10)
             return
         }
@@ -65,7 +63,7 @@ extension MainViewController {
         var parameters: [String: String] = [:]
         let utcISODateFormatter = ISO8601DateFormatter()
         let date = Calendar.current.date(byAdding: .day, value: -1 * UserDefaultsRepository.downloadDays.value, to: Date())!
-        parameters["count"] = "1000"
+        parameters["count"] = "\(UserDefaultsRepository.downloadDays.value * 2 * 24 * 60 / 5)"
         parameters["find[dateString][$gte]"] = utcISODateFormatter.string(from: date)
         
         NightscoutUtils.executeRequest(eventType: .sgv, parameters: parameters) { (result: Result<[ShareGlucoseData], Error>) in
@@ -115,10 +113,6 @@ extension MainViewController {
                 }
             case .failure(let error):
                 print("Failed to fetch data: \(error)")
-                if globalVariables.nsVerifiedAlert < dateTimeUtils.getNowTimeIntervalUTC() + 300 {
-                    globalVariables.nsVerifiedAlert = dateTimeUtils.getNowTimeIntervalUTC()
-                    //self.sendNotification(title: "Nightscout Error", body: "Please double check url, token, and internet connection. This may also indicate a temporary Nightscout issue")
-                }
                 DispatchQueue.main.async {
                     if self.bgTimer.isValid {
                         self.bgTimer.invalidate()
@@ -176,9 +170,8 @@ extension MainViewController {
                 self.startBGTimer(time: 300 - secondsAgo + Double(UserDefaultsRepository.bgUpdateDelay.value))
                 let timerVal = 310 - secondsAgo
                 print("##### started 5:10 bg timer: \(timerVal)")
-                self.updateBadge(val: data[0].sgv)
-                if UserDefaultsRepository.speakBG.value {
-                    self.speakBG(currentValue: data[0].sgv, previousValue: data[1].sgv)
+                if data.count > 1 {
+                    self.evaluateSpeakConditions(currentValue: data[0].sgv, previousValue: data[1].sgv)
                 }
             }
         }
@@ -246,8 +239,8 @@ extension MainViewController {
             var snoozerDelta = ""
             
             // Set BGText with the latest BG value
-            self.BGText.text = bgUnits.toDisplayUnits(String(latestBG))
-            snoozerBG = bgUnits.toDisplayUnits(String(latestBG))
+            self.BGText.text = Localizer.toDisplayUnits(String(latestBG))
+            snoozerBG = Localizer.toDisplayUnits(String(latestBG))
             self.setBGTextColor()
             
             // Direction handling
@@ -263,12 +256,12 @@ extension MainViewController {
             
             // Delta handling
             if deltaBG < 0 {
-                self.DeltaText.text = bgUnits.toDisplayUnits(String(deltaBG))
-                snoozerDelta = bgUnits.toDisplayUnits(String(deltaBG))
+                self.DeltaText.text = Localizer.toDisplayUnits(String(deltaBG))
+                snoozerDelta = Localizer.toDisplayUnits(String(deltaBG))
                 self.latestDeltaString = String(deltaBG)
             } else {
-                self.DeltaText.text = "+" + bgUnits.toDisplayUnits(String(deltaBG))
-                snoozerDelta = "+" + bgUnits.toDisplayUnits(String(deltaBG))
+                self.DeltaText.text = "+" + Localizer.toDisplayUnits(String(deltaBG))
+                snoozerDelta = "+" + Localizer.toDisplayUnits(String(deltaBG))
                 self.latestDeltaString = "+" + String(deltaBG)
             }
             
@@ -278,8 +271,10 @@ extension MainViewController {
             attributeString.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: NSRange(location: 0, length: attributeString.length))
             if deltaTime >= 12 { // Data is stale
                 attributeString.addAttribute(.strikethroughColor, value: UIColor.systemRed, range: NSRange(location: 0, length: attributeString.length))
+                self.updateBadge(val: 0)
             } else { // Data is fresh
                 attributeString.addAttribute(.strikethroughColor, value: UIColor.clear, range: NSRange(location: 0, length: attributeString.length))
+                self.updateBadge(val: latestBG)
             }
             self.BGText.attributedText = attributeString
             

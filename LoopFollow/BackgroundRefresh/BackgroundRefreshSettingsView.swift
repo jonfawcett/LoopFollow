@@ -73,7 +73,12 @@ struct BackgroundRefreshSettingsView: View {
                         .foregroundColor(.secondary)
 
                 case .dexcom:
-                    Text("Requires a Dexcom G6/ONE/G7/ONE+ transmitter within Bluetooth range. Provides updates every 5 minutes and uses less battery than the silent tune method.")
+                    Text("Requires a Dexcom G6/ONE/G7/ONE+ transmitter within Bluetooth range. Provides updates every 5 minutes and uses less battery than the silent tune method. If you have more than one device to choose from, select the one with the smallest expected bg delay.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+
+                case .omnipodDash:
+                    Text("Requires an OmniPod DASH pod paired with this device within Bluetooth range. Provides updates once every 3 minutes and uses less battery than the silent tune method.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -94,6 +99,11 @@ struct BackgroundRefreshSettingsView: View {
                     if(storedDevice.rssi != 0)
                     {
                         Text("RSSI: \(storedDevice.rssi) dBm")
+                            .foregroundColor(.secondary)
+                            .font(.footnote)
+                    }
+                    if let offset = BLEManager.shared.expectedSensorFetchOffsetString(for: storedDevice) {
+                        Text("Expected bg delay: \(offset)")
                             .foregroundColor(.secondary)
                             .font(.footnote)
                     }

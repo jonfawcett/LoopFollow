@@ -1,26 +1,28 @@
 //
-//  RileyLinkHeartbeatBluetoothTransmitter.swift
+//  OmnipodDashHeartbeatBluetoothTransmitter.swift
 //  LoopFollow
 //
-//  Created by Jonas Björkert on 2025-01-08.
+//  Created by Jonas Björkert on 2025-03-01.
 //  Copyright © 2025 Jon Fawcett. All rights reserved.
 //
 
 import Foundation
 import CoreBluetooth
 
-class RileyLinkHeartbeatBluetoothDevice: BluetoothDevice {
-    private let CBUUID_Service_RileyLink: String = "0235733B-99C5-4197-B856-69219C2A3845"
-    private let CBUUID_ReceiveCharacteristic_TimerTick: String = "6E6C7910-B89E-43A5-78AF-50C5E2B86F7E"
-    private let CBUUID_ReceiveCharacteristic_Data: String = "C842E849-5028-42E2-867C-016ADADA9155"
+class OmnipodDashHeartbeatBluetoothTransmitter: BluetoothDevice {
+    private let CBUUID_Service: String = "1A7E4024-E3ED-4464-8B7E-751E03D0DC5F"
+    private let CBUUID_Advertisement: String = "00004024-0000-1000-8000-00805f9b34fb"
+    private let CBUUID_ReceiveCharacteristic: String = "1A7E2442-E3ED-4464-8B7E-751E03D0DC5F"
+
+    private let CBUUID_ReceiveCharacteristic_Data: String = ""
 
     init(address:String, name:String?, bluetoothDeviceDelegate: BluetoothDeviceDelegate) {
         super.init(
             address: address,
             name: name,
             CBUUID_Advertisement: nil,
-            servicesCBUUIDs: [CBUUID(string: CBUUID_Service_RileyLink)],
-            CBUUID_ReceiveCharacteristic: CBUUID_ReceiveCharacteristic_TimerTick,
+            servicesCBUUIDs: [CBUUID(string: CBUUID_Service)],
+            CBUUID_ReceiveCharacteristic: CBUUID_ReceiveCharacteristic,
             bluetoothDeviceDelegate: bluetoothDeviceDelegate
         )
     }
@@ -32,14 +34,10 @@ class RileyLinkHeartbeatBluetoothDevice: BluetoothDevice {
     override func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         super.peripheral(peripheral, didUpdateValueFor: characteristic, error: error)
 
-        guard characteristic.uuid == CBUUID(string: CBUUID_ReceiveCharacteristic_TimerTick) else {
-            return
-        }
-
         self.bluetoothDeviceDelegate?.heartBeat()
     }
 
     override func expectedHeartbeatInterval() -> TimeInterval? {
-        return 60
+        return 3 * 60
     }
 }
